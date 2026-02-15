@@ -26,16 +26,14 @@
 
   // --------- SETTINGS ----------
   const MAX_ATTENDEES = 50;
-  const STORAGE_KEY = "intel_summit_checkins_v3"; // bumped to avoid old conflicts
+  const STORAGE_KEY = "intel_summit_checkins_v4"; // new key to avoid old broken states
 
-  // Map your select values -> display names + count element + card element
   const TEAM_MAP = {
     water: { label: "Team Water Wise", countEl: waterCountEl, cardEl: waterCard },
     zero: { label: "Team Net Zero", countEl: zeroCountEl, cardEl: zeroCard },
     power: { label: "Team Renewables", countEl: powerCountEl, cardEl: powerCard }
   };
 
-  // Backward compatibility: map labels to keys (fixes any old saved data)
   const LABEL_TO_KEY = {
     "Team Water Wise": "water",
     "Team Net Zero": "zero",
@@ -43,23 +41,23 @@
   };
 
   // --------- STATE ----------
-  // state.checkins: [{ id, nameOriginal, nameKey, teamKey, timeISO }]
-  // state.celebrated: boolean
   let state = loadState();
 
   // Injected UI elements
   let attendeeListEl = null;
   let celebrationBannerEl = null;
+  let adminPanelEl = null;
 
   // Confetti state
   let confettiAlreadyFired = false;
 
   // --------- INIT ----------
-  ensureAttendeeListUI();
+  ensureAttendeeListUI();      // now reuses existing #attendeeList if present
   ensureCelebrationBannerUI();
+  ensureAdminControlsUI();     // reset/remove-last buttons injected
   renderAll();
   wireEvents();
-  maybeCelebrate(); // if already at goal from saved state, show celebration/confetti
+  maybeCelebrate();
 
   // ===========================
   // Event Wiring
@@ -81,7 +79,6 @@
     const rawTeamValue = (teamSelect?.value || "").trim();
     const teamKey = normalizeTeamKey(rawTeamValue);
 
-    // Validation
     if (!nameOriginal) {
       showMessage("⚠️ Please enter a name.", false);
       nameInput?.focus();
@@ -93,22 +90,18 @@
       return;
     }
 
-    // Capacity check
     if (state.checkins.length >= MAX_ATTENDEES) {
-      showMessage(`🚫 Event is at capacity (${MAX_ATTENDEES}/${MAX_ATTENDEES}).`, false);
+      showMessage(`🚫 Event is at capacity (${MAX_ATTENDEES}/${MAX_ATTENDEES}). Delete someone to add more.`, false);
       lockIfFull();
-      maybeCelebrate();
       return;
     }
 
-    // Duplicate check: same normalized name + same team
     const nameKey = normalizeName(nameOriginal);
     if (isDuplicate(nameKey, teamKey)) {
       showMessage(`ℹ️ ${nameOriginal} is already checked in for ${TEAM_MAP[teamKey].label}.`, false);
       return;
     }
 
-    // Add check-in
     state.checkins.push({
       id: makeId(),
       nameOriginal,
@@ -119,26 +112,25 @@
 
     saveState(state);
 
-    // Personalized greeting
     showMessage(`🎉 Welcome, ${nameOriginal} from ${TEAM_MAP[teamKey].label}!`, true);
 
-    // Update UI
     renderAll();
     lockIfFull();
     maybeCelebrate();
 
-    // Reset name only (keep team selected)
     if (nameInput) nameInput.value = "";
     nameInput?.focus();
   }
 
   function deleteCheckInById(id) {
     const idx = state.checkins.findIndex((c) => c.id === id);
-    if (idx === -1) return;
+    if (idx === -1) {
+      showMessage("⚠️ Could not delete (record not found). Try Reset All if needed.", false);
+      return;
+    }
 
     const removed = state.checkins.splice(idx, 1)[0];
 
-    // If we drop below goal, turn off celebration state + UI and allow confetti again later
     if (state.checkins.length < MAX_ATTENDEES) {
       state.celebrated = false;
       if (celebrationBannerEl) celebrationBannerEl.style.display = "none";
@@ -151,7 +143,7 @@
     lockIfFull();
 
     const teamLabel = TEAM_MAP[removed.teamKey]?.label || removed.teamKey;
-    showMessage(`🗑️ Removed ${removed.nameOriginal} (${teamLabel}).`, true);
+    showMessage(`🗑️ Deleted: ${removed.nameOriginal} (${teamLabel}).`, true);
   }
 
   function editCheckInById(id) {
@@ -162,16 +154,14 @@
     const currentName = current.nameOriginal;
     const currentTeamKey = normalizeTeamKey(current.teamKey);
 
-    // Ask for new name
     const newNameRaw = window.prompt("Edit attendee name:", currentName);
-    if (newNameRaw === null) return; // Cancel
+    if (newNameRaw === null) return;
     const newName = newNameRaw.trim();
     if (!newName) {
       showMessage("⚠️ Edit cancelled: name cannot be blank.", false);
       return;
     }
 
-    // Ask for new team (1/2/3)
     const teamMenu =
       "Edit team (type 1, 2, or 3):\n" +
       "1 = Team Water Wise\n" +
@@ -194,21 +184,15 @@
       return;
     }
 
-    // Duplicate prevention (ignore record being edited)
     const newNameKey = normalizeName(newName);
     const wouldDuplicate = state.checkins.some(
       (c) => c.id !== id && c.nameKey === newNameKey && normalizeTeamKey(c.teamKey) === newTeamKey
     );
-
     if (wouldDuplicate) {
-      showMessage(
-        `⚠️ Cannot edit: "${newName}" is already checked in for ${TEAM_MAP[newTeamKey].label}.`,
-        false
-      );
+      showMessage(`⚠️ Cannot edit: "${newName}" already exists in ${TEAM_MAP[newTeamKey].label}.`, false);
       return;
     }
 
-    // Apply edit
     state.checkins[idx] = {
       ...current,
       nameOriginal: newName,
@@ -219,13 +203,39 @@
     saveState(state);
     renderAll();
     lockIfFull();
+    if (state.checkins.length === MAX_ATTENDEES) maybeCelebrate();
 
-    // Celebration/confetti logic stays consistent at 50
-    if (state.checkins.length === MAX_ATTENDEES) {
-      maybeCelebrate();
+    showMessage(`✅ Updated: ${newName} → ${TEAM_MAP[newTeamKey].label}`, true);
+  }
+
+  function removeLastCheckIn() {
+    if (state.checkins.length === 0) return;
+    const removed = state.checkins.pop();
+
+    if (state.checkins.length < MAX_ATTENDEES) {
+      state.celebrated = false;
+      if (celebrationBannerEl) celebrationBannerEl.style.display = "none";
+      clearAllTeamHighlights();
+      resetConfettiFlagIfNeeded();
     }
 
-    showMessage(`✅ Updated: ${newName} is now in ${TEAM_MAP[newTeamKey].label}.`, true);
+    saveState(state);
+    renderAll();
+    lockIfFull();
+
+    const teamLabel = TEAM_MAP[removed.teamKey]?.label || removed.teamKey;
+    showMessage(`🗑️ Removed last: ${removed.nameOriginal} (${teamLabel}).`, true);
+  }
+
+  function resetAll() {
+    state = { checkins: [], celebrated: false };
+    saveState(state);
+    if (celebrationBannerEl) celebrationBannerEl.style.display = "none";
+    clearAllTeamHighlights();
+    resetConfettiFlagIfNeeded();
+    renderAll();
+    lockIfFull();
+    showMessage("✅ Reset complete: all check-ins cleared.", true);
   }
 
   // ===========================
@@ -260,6 +270,7 @@
     renderAttendeeList();
     clearTeamHighlightsIfNotCelebrated();
     lockIfFull();
+    updateAdminPanel();
   }
 
   function renderCounts() {
@@ -274,7 +285,6 @@
   }
 
   function renderTeamCounts() {
-    // reset visible counts
     Object.values(TEAM_MAP).forEach(({ countEl }) => {
       if (countEl) countEl.textContent = "0";
     });
@@ -435,6 +445,12 @@
   function ensureCelebrationBannerUI() {
     if (!container) return;
 
+    const existing = document.getElementById("celebrationBanner");
+    if (existing) {
+      celebrationBannerEl = existing;
+      return;
+    }
+
     celebrationBannerEl = document.createElement("div");
     celebrationBannerEl.id = "celebrationBanner";
     celebrationBannerEl.style.display = "none";
@@ -461,10 +477,18 @@
   }
 
   // ===========================
-  // Attendee List UI (Injected) + Delegated Buttons
+  // Attendee List UI + Delegated Clicks (FIX for delete/edit)
   // ===========================
   function ensureAttendeeListUI() {
     if (!container) return;
+
+    // ✅ If it already exists from earlier code, reuse it
+    const existingList = document.getElementById("attendeeList");
+    if (existingList) {
+      attendeeListEl = existingList;
+      attachDelegatedListHandlerOnce(attendeeListEl);
+      return;
+    }
 
     const section = document.createElement("div");
     section.id = "attendeeListSection";
@@ -486,8 +510,25 @@
     list.style.padding = "0";
     list.style.margin = "0";
 
-    // ✅ Reliable: one click handler for all Edit/Delete buttons
-    list.addEventListener("click", (e) => {
+    attachDelegatedListHandlerOnce(list);
+
+    section.appendChild(title);
+    section.appendChild(list);
+
+    if (teamStatsSection && teamStatsSection.parentNode) {
+      teamStatsSection.parentNode.insertBefore(section, teamStatsSection);
+    } else {
+      container.appendChild(section);
+    }
+
+    attendeeListEl = list;
+  }
+
+  function attachDelegatedListHandlerOnce(listEl) {
+    if (!listEl || listEl.dataset.bound === "true") return;
+    listEl.dataset.bound = "true";
+
+    listEl.addEventListener("click", (e) => {
       const btn = e.target.closest("button");
       if (!btn) return;
 
@@ -505,17 +546,60 @@
         editCheckInById(id);
       }
     });
+  }
 
-    section.appendChild(title);
-    section.appendChild(list);
+  // ===========================
+  // Admin Controls (Recovery)
+  // ===========================
+  function ensureAdminControlsUI() {
+    if (!container) return;
 
-    if (teamStatsSection && teamStatsSection.parentNode) {
-      teamStatsSection.parentNode.insertBefore(section, teamStatsSection);
-    } else {
-      container.appendChild(section);
+    const existing = document.getElementById("adminControls");
+    if (existing) {
+      adminPanelEl = existing;
+      return;
     }
 
-    attendeeListEl = list;
+    adminPanelEl = document.createElement("div");
+    adminPanelEl.id = "adminControls";
+    adminPanelEl.style.marginTop = "14px";
+    adminPanelEl.style.display = "none";
+    adminPanelEl.style.gap = "10px";
+    adminPanelEl.style.justifyContent = "center";
+    adminPanelEl.style.alignItems = "center";
+    adminPanelEl.style.flexWrap = "wrap";
+
+    const resetBtn = document.createElement("button");
+    resetBtn.type = "button";
+    resetBtn.textContent = "Reset All";
+    stylePrimaryAdminButton(resetBtn);
+    resetBtn.addEventListener("click", () => {
+      const ok = window.confirm("Reset ALL check-ins and start over?");
+      if (ok) resetAll();
+    });
+
+    const removeLastBtn = document.createElement("button");
+    removeLastBtn.type = "button";
+    removeLastBtn.textContent = "Remove Last";
+    styleSecondaryAdminButton(removeLastBtn);
+    removeLastBtn.addEventListener("click", () => removeLastCheckIn());
+
+    adminPanelEl.appendChild(resetBtn);
+    adminPanelEl.appendChild(removeLastBtn);
+
+    // Put it under the greeting message
+    const greetingEl = document.getElementById("greeting");
+    if (greetingEl && greetingEl.parentNode) {
+      greetingEl.parentNode.insertBefore(adminPanelEl, greetingEl.nextSibling);
+    } else {
+      container.prepend(adminPanelEl);
+    }
+  }
+
+  function updateAdminPanel() {
+    if (!adminPanelEl) return;
+    // Show controls when full OR when something seems stuck
+    adminPanelEl.style.display = state.checkins.length >= MAX_ATTENDEES ? "flex" : "none";
   }
 
   // ===========================
@@ -537,7 +621,7 @@
   }
 
   // ===========================
-  // Confetti (no libraries)
+  // Confetti
   // ===========================
   function fireConfetti() {
     if (confettiAlreadyFired) return;
@@ -607,11 +691,8 @@
         ctx.restore();
       }
 
-      if (elapsed < durationMs) {
-        requestAnimationFrame(draw);
-      } else {
-        cleanup();
-      }
+      if (elapsed < durationMs) requestAnimationFrame(draw);
+      else cleanup();
     }
 
     function cleanup() {
@@ -636,7 +717,7 @@
   }
 
   // ===========================
-  // Button Styling Helpers (inline so no CSS changes)
+  // Inline Button Styles (no CSS changes)
   // ===========================
   function styleSmallActionButton(btn) {
     btn.style.height = "34px";
@@ -647,11 +728,7 @@
     btn.style.color = "#1f2937";
     btn.style.cursor = "pointer";
     btn.style.fontWeight = "700";
-    btn.style.display = "flex";
-    btn.style.alignItems = "center";
-    btn.style.justifyContent = "center";
     btn.style.boxShadow = "0 2px 8px rgba(0,0,0,0.04)";
-
     btn.addEventListener("mouseenter", () => (btn.style.background = "#f1f5f9"));
     btn.addEventListener("mouseleave", () => (btn.style.background = "#ffffff"));
   }
@@ -666,13 +743,33 @@
     btn.style.color = "#1f2937";
     btn.style.cursor = "pointer";
     btn.style.fontWeight = "800";
-    btn.style.display = "flex";
-    btn.style.alignItems = "center";
-    btn.style.justifyContent = "center";
     btn.style.boxShadow = "0 2px 8px rgba(0,0,0,0.04)";
-
     btn.addEventListener("mouseenter", () => (btn.style.background = "#f1f5f9"));
     btn.addEventListener("mouseleave", () => (btn.style.background = "#ffffff"));
+  }
+
+  function stylePrimaryAdminButton(btn) {
+    btn.style.height = "40px";
+    btn.style.padding = "0 14px";
+    btn.style.borderRadius = "12px";
+    btn.style.border = "none";
+    btn.style.background = "#0071c5";
+    btn.style.color = "#fff";
+    btn.style.cursor = "pointer";
+    btn.style.fontWeight = "800";
+    btn.style.boxShadow = "0 4px 12px rgba(0, 113, 197, 0.2)";
+  }
+
+  function styleSecondaryAdminButton(btn) {
+    btn.style.height = "40px";
+    btn.style.padding = "0 14px";
+    btn.style.borderRadius = "12px";
+    btn.style.border = "1px solid rgba(0,0,0,0.12)";
+    btn.style.background = "#ffffff";
+    btn.style.color = "#1f2937";
+    btn.style.cursor = "pointer";
+    btn.style.fontWeight = "800";
+    btn.style.boxShadow = "0 2px 8px rgba(0,0,0,0.04)";
   }
 
   // ===========================
@@ -702,10 +799,7 @@
         })
         .filter((c) => TEAM_MAP[c.teamKey]);
 
-      if (parsed.checkins.length > MAX_ATTENDEES) {
-        parsed.checkins = parsed.checkins.slice(0, MAX_ATTENDEES);
-      }
-
+      if (parsed.checkins.length > MAX_ATTENDEES) parsed.checkins = parsed.checkins.slice(0, MAX_ATTENDEES);
       if (parsed.checkins.length === MAX_ATTENDEES) parsed.celebrated = true;
 
       return parsed;
@@ -719,18 +813,11 @@
   }
 
   // ===========================
-  // Optional Admin Helpers (Console)
+  // Console Admin Helpers
   // ===========================
   window.IntelCheckIn = {
-    reset() {
-      state = { checkins: [], celebrated: false };
-      saveState(state);
-      if (celebrationBannerEl) celebrationBannerEl.style.display = "none";
-      clearAllTeamHighlights();
-      resetConfettiFlagIfNeeded();
-      renderAll();
-      showMessage("✅ Reset: all check-ins cleared.", true);
-    },
+    reset: resetAll,
+    removeLast: removeLastCheckIn,
     export() {
       return JSON.stringify(state, null, 2);
     }
