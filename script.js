@@ -1,9 +1,3 @@
-/* =========================================================
-   Intel Sustainability Summit Check-In (script.js)
-   FULL RUBRIC + Delete (X) + Edit attendee (name/team) + Confetti at 50
-   - No HTML/CSS changes required
-   ========================================================= */
-
 (() => {
   "use strict";
 
@@ -32,7 +26,7 @@
 
   // --------- SETTINGS ----------
   const MAX_ATTENDEES = 50;
-  const STORAGE_KEY = "intel_summit_checkins_v2";
+  const STORAGE_KEY = "intel_summit_checkins_v3"; // bumped to avoid old conflicts
 
   // Map your select values -> display names + count element + card element
   const TEAM_MAP = {
@@ -41,7 +35,7 @@
     power: { label: "Team Renewables", countEl: powerCountEl, cardEl: powerCard }
   };
 
-  // Backward compatibility: map labels to keys (fixes old saved data)
+  // Backward compatibility: map labels to keys (fixes any old saved data)
   const LABEL_TO_KEY = {
     "Team Water Wise": "water",
     "Team Net Zero": "zero",
@@ -57,12 +51,15 @@
   let attendeeListEl = null;
   let celebrationBannerEl = null;
 
+  // Confetti state
+  let confettiAlreadyFired = false;
+
   // --------- INIT ----------
   ensureAttendeeListUI();
   ensureCelebrationBannerUI();
   renderAll();
   wireEvents();
-  maybeCelebrate(); // if already at goal from saved state, show celebration/highlight/confetti
+  maybeCelebrate(); // if already at goal from saved state, show celebration/confetti
 
   // ===========================
   // Event Wiring
@@ -122,8 +119,10 @@
 
     saveState(state);
 
+    // Personalized greeting
     showMessage(`🎉 Welcome, ${nameOriginal} from ${TEAM_MAP[teamKey].label}!`, true);
 
+    // Update UI
     renderAll();
     lockIfFull();
     maybeCelebrate();
@@ -139,7 +138,7 @@
 
     const removed = state.checkins.splice(idx, 1)[0];
 
-    // If we drop below goal, turn off celebration state + UI
+    // If we drop below goal, turn off celebration state + UI and allow confetti again later
     if (state.checkins.length < MAX_ATTENDEES) {
       state.celebrated = false;
       if (celebrationBannerEl) celebrationBannerEl.style.display = "none";
@@ -163,7 +162,7 @@
     const currentName = current.nameOriginal;
     const currentTeamKey = normalizeTeamKey(current.teamKey);
 
-    // 1) Ask for new name
+    // Ask for new name
     const newNameRaw = window.prompt("Edit attendee name:", currentName);
     if (newNameRaw === null) return; // Cancel
     const newName = newNameRaw.trim();
@@ -172,7 +171,7 @@
       return;
     }
 
-    // 2) Ask for new team
+    // Ask for new team (1/2/3)
     const teamMenu =
       "Edit team (type 1, 2, or 3):\n" +
       "1 = Team Water Wise\n" +
@@ -183,7 +182,7 @@
       currentTeamKey === "water" ? "1" : currentTeamKey === "zero" ? "2" : "3";
 
     const teamChoice = window.prompt(teamMenu, defaultChoice);
-    if (teamChoice === null) return; // Cancel
+    if (teamChoice === null) return;
 
     const choice = teamChoice.trim();
     let newTeamKey = "";
@@ -195,18 +194,21 @@
       return;
     }
 
-    // 3) Duplicate prevention (ignore record being edited)
+    // Duplicate prevention (ignore record being edited)
     const newNameKey = normalizeName(newName);
     const wouldDuplicate = state.checkins.some(
       (c) => c.id !== id && c.nameKey === newNameKey && normalizeTeamKey(c.teamKey) === newTeamKey
     );
 
     if (wouldDuplicate) {
-      showMessage(`⚠️ Cannot edit: "${newName}" is already checked in for ${TEAM_MAP[newTeamKey].label}.`, false);
+      showMessage(
+        `⚠️ Cannot edit: "${newName}" is already checked in for ${TEAM_MAP[newTeamKey].label}.`,
+        false
+      );
       return;
     }
 
-    // 4) Apply edit
+    // Apply edit
     state.checkins[idx] = {
       ...current,
       nameOriginal: newName,
@@ -218,20 +220,17 @@
     renderAll();
     lockIfFull();
 
-    // Confetti rule: only fire at exactly 50; editing doesn't change count,
-    // but we keep celebration logic consistent
-    if (state.checkins.length < MAX_ATTENDEES) {
-      state.celebrated = false;
-      if (celebrationBannerEl) celebrationBannerEl.style.display = "none";
-      clearAllTeamHighlights();
-      resetConfettiFlagIfNeeded();
-    } else {
+    // Celebration/confetti logic stays consistent at 50
+    if (state.checkins.length === MAX_ATTENDEES) {
       maybeCelebrate();
     }
 
     showMessage(`✅ Updated: ${newName} is now in ${TEAM_MAP[newTeamKey].label}.`, true);
   }
 
+  // ===========================
+  // Helpers
+  // ===========================
   function isDuplicate(nameKey, teamKey) {
     return state.checkins.some((c) => c.nameKey === nameKey && normalizeTeamKey(c.teamKey) === teamKey);
   }
@@ -275,6 +274,7 @@
   }
 
   function renderTeamCounts() {
+    // reset visible counts
     Object.values(TEAM_MAP).forEach(({ countEl }) => {
       if (countEl) countEl.textContent = "0";
     });
@@ -289,7 +289,7 @@
     if (!attendeeListEl) return;
 
     attendeeListEl.innerHTML = "";
-    const items = [...state.checkins].reverse(); // newest first
+    const items = [...state.checkins].reverse();
 
     if (items.length === 0) {
       const li = document.createElement("li");
@@ -338,65 +338,20 @@
       teamPill.style.color = "#003c71";
       teamPill.style.background = "#e8f4fc";
 
-      // EDIT button
       const editBtn = document.createElement("button");
       editBtn.type = "button";
       editBtn.textContent = "Edit";
-      editBtn.title = "Edit name/team";
-      editBtn.style.height = "34px";
-      editBtn.style.padding = "0 12px";
-      editBtn.style.borderRadius = "10px";
-      editBtn.style.border = "1px solid rgba(0,0,0,0.10)";
-      editBtn.style.background = "#ffffff";
-      editBtn.style.color = "#1f2937";
-      editBtn.style.cursor = "pointer";
-      editBtn.style.fontWeight = "700";
-      editBtn.style.display = "flex";
-      editBtn.style.alignItems = "center";
-      editBtn.style.justifyContent = "center";
-      editBtn.style.boxShadow = "0 2px 8px rgba(0,0,0,0.04)";
+      editBtn.dataset.action = "edit";
+      editBtn.dataset.id = c.id;
+      styleSmallActionButton(editBtn);
 
-      editBtn.addEventListener("mouseenter", () => {
-        editBtn.style.background = "#f1f5f9";
-      });
-      editBtn.addEventListener("mouseleave", () => {
-        editBtn.style.background = "#ffffff";
-      });
-
-      editBtn.addEventListener("click", () => editCheckInById(c.id));
-
-      // DELETE (X) button
       const delBtn = document.createElement("button");
       delBtn.type = "button";
       delBtn.textContent = "✕";
-      delBtn.setAttribute("aria-label", `Delete ${c.nameOriginal}`);
       delBtn.title = "Delete attendee";
-      delBtn.style.width = "34px";
-      delBtn.style.height = "34px";
-      delBtn.style.minWidth = "34px";
-      delBtn.style.borderRadius = "10px";
-      delBtn.style.border = "1px solid rgba(0,0,0,0.10)";
-      delBtn.style.background = "#ffffff";
-      delBtn.style.color = "#1f2937";
-      delBtn.style.cursor = "pointer";
-      delBtn.style.fontWeight = "800";
-      delBtn.style.display = "flex";
-      delBtn.style.alignItems = "center";
-      delBtn.style.justifyContent = "center";
-      delBtn.style.boxShadow = "0 2px 8px rgba(0,0,0,0.04)";
-
-      delBtn.addEventListener("mouseenter", () => {
-        delBtn.style.background = "#f1f5f9";
-      });
-      delBtn.addEventListener("mouseleave", () => {
-        delBtn.style.background = "#ffffff";
-      });
-
-      delBtn.addEventListener("click", () => {
-        const teamLabel = TEAM_MAP[normalizeTeamKey(c.teamKey)]?.label || c.teamKey;
-        const ok = window.confirm(`Delete check-in for ${c.nameOriginal} (${teamLabel})?`);
-        if (ok) deleteCheckInById(c.id);
-      });
+      delBtn.dataset.action = "delete";
+      delBtn.dataset.id = c.id;
+      styleXButton(delBtn);
 
       rightWrap.appendChild(teamPill);
       rightWrap.appendChild(editBtn);
@@ -416,7 +371,7 @@
   }
 
   // ===========================
-  // Celebration (Rubric LevelUp)
+  // Celebration + Confetti
   // ===========================
   function maybeCelebrate() {
     if (state.checkins.length !== MAX_ATTENDEES) return;
@@ -434,7 +389,6 @@
       `🎊 Goal reached! ${MAX_ATTENDEES}/${MAX_ATTENDEES} checked in. Winning team: ${winnerNames}!`
     );
 
-    // CONFETTI!
     fireConfetti();
   }
 
@@ -450,20 +404,14 @@
   function getWinningTeams() {
     const counts = getTeamCounts();
     const max = Math.max(counts.water, counts.zero, counts.power);
-    const winners = [];
-    for (const k of Object.keys(counts)) {
-      if (counts[k] === max) winners.push(k);
-    }
-    return winners;
+    return Object.keys(counts).filter((k) => counts[k] === max);
   }
 
   function highlightWinners(winnerKeys) {
     clearAllTeamHighlights();
-
     for (const key of winnerKeys) {
       const card = TEAM_MAP[key]?.cardEl;
       if (!card) continue;
-
       card.style.outline = "3px solid #0071c5";
       card.style.boxShadow = "0 10px 30px rgba(0, 113, 197, 0.25)";
       card.style.transform = "translateY(-2px)";
@@ -513,7 +461,7 @@
   }
 
   // ===========================
-  // Attendee List (Rubric LevelUp)
+  // Attendee List UI (Injected) + Delegated Buttons
   // ===========================
   function ensureAttendeeListUI() {
     if (!container) return;
@@ -537,6 +485,26 @@
     list.style.gap = "10px";
     list.style.padding = "0";
     list.style.margin = "0";
+
+    // ✅ Reliable: one click handler for all Edit/Delete buttons
+    list.addEventListener("click", (e) => {
+      const btn = e.target.closest("button");
+      if (!btn) return;
+
+      const action = btn.dataset.action;
+      const id = btn.dataset.id;
+      if (!action || !id) return;
+
+      e.preventDefault();
+      e.stopPropagation();
+
+      if (action === "delete") {
+        const ok = window.confirm("Delete this attendee?");
+        if (ok) deleteCheckInById(id);
+      } else if (action === "edit") {
+        editCheckInById(id);
+      }
+    });
 
     section.appendChild(title);
     section.appendChild(list);
@@ -571,8 +539,6 @@
   // ===========================
   // Confetti (no libraries)
   // ===========================
-  let confettiAlreadyFired = false;
-
   function fireConfetti() {
     if (confettiAlreadyFired) return;
     confettiAlreadyFired = true;
@@ -589,8 +555,8 @@
     document.body.appendChild(canvas);
 
     const ctx = canvas.getContext("2d");
-
     const dpr = window.devicePixelRatio || 1;
+
     function resize() {
       canvas.width = Math.floor(window.innerWidth * dpr);
       canvas.height = Math.floor(window.innerHeight * dpr);
@@ -618,7 +584,7 @@
       });
     }
 
-    let start = performance.now();
+    const start = performance.now();
     const durationMs = 4200;
 
     function draw(now) {
@@ -667,6 +633,46 @@
       const existing = document.getElementById("confettiCanvas");
       if (existing) existing.remove();
     }
+  }
+
+  // ===========================
+  // Button Styling Helpers (inline so no CSS changes)
+  // ===========================
+  function styleSmallActionButton(btn) {
+    btn.style.height = "34px";
+    btn.style.padding = "0 12px";
+    btn.style.borderRadius = "10px";
+    btn.style.border = "1px solid rgba(0,0,0,0.10)";
+    btn.style.background = "#ffffff";
+    btn.style.color = "#1f2937";
+    btn.style.cursor = "pointer";
+    btn.style.fontWeight = "700";
+    btn.style.display = "flex";
+    btn.style.alignItems = "center";
+    btn.style.justifyContent = "center";
+    btn.style.boxShadow = "0 2px 8px rgba(0,0,0,0.04)";
+
+    btn.addEventListener("mouseenter", () => (btn.style.background = "#f1f5f9"));
+    btn.addEventListener("mouseleave", () => (btn.style.background = "#ffffff"));
+  }
+
+  function styleXButton(btn) {
+    btn.style.width = "34px";
+    btn.style.height = "34px";
+    btn.style.minWidth = "34px";
+    btn.style.borderRadius = "10px";
+    btn.style.border = "1px solid rgba(0,0,0,0.10)";
+    btn.style.background = "#ffffff";
+    btn.style.color = "#1f2937";
+    btn.style.cursor = "pointer";
+    btn.style.fontWeight = "800";
+    btn.style.display = "flex";
+    btn.style.alignItems = "center";
+    btn.style.justifyContent = "center";
+    btn.style.boxShadow = "0 2px 8px rgba(0,0,0,0.04)";
+
+    btn.addEventListener("mouseenter", () => (btn.style.background = "#f1f5f9"));
+    btn.addEventListener("mouseleave", () => (btn.style.background = "#ffffff"));
   }
 
   // ===========================
