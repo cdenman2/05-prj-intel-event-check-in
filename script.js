@@ -1,15 +1,3 @@
-/* =========================================================
-   Intel Sustainability Summit Check-In (script.js)
-   FULL RUBRIC VERSION:
-   ✅ Personalized greeting each check-in
-   ✅ Total attendance count updates
-   ✅ Team tracking updates
-   ✅ Progress bar updates (goal = 50)
-   ✅ Celebration feature at goal + highlights winning team
-   ✅ Save progress (localStorage)
-   ✅ Attendee list (name + team) auto-injected + updates
-   ========================================================= */
-
 (() => {
   "use strict";
 
@@ -38,7 +26,7 @@
 
   // --------- SETTINGS ----------
   const MAX_ATTENDEES = 50;
-  const STORAGE_KEY = "intel_summit_checkins_v2"; // bump version to avoid conflicts
+  const STORAGE_KEY = "intel_summit_checkins_v2";
 
   // Map your select values -> display names + count element + card element
   const TEAM_MAP = {
@@ -47,12 +35,17 @@
     power: { label: "Team Renewables", countEl: powerCountEl, cardEl: powerCard }
   };
 
+  // Backward compatibility: map labels to keys (fixes old saved data)
+  const LABEL_TO_KEY = {
+    "Team Water Wise": "water",
+    "Team Net Zero": "zero",
+    "Team Renewables": "power"
+  };
+
   // --------- STATE ----------
-  // state.checkins: [{ nameOriginal, nameKey, teamKey, timeISO }]
-  // state.celebrated: boolean (celebration already shown)
   let state = loadState();
 
-  // Attendee list injected elements
+  // Injected UI elements
   let attendeeListEl = null;
   let celebrationBannerEl = null;
 
@@ -61,6 +54,7 @@
   ensureCelebrationBannerUI();
   renderAll();
   wireEvents();
+  maybeCelebrate(); // if already at goal from saved state, show celebration/highlight
 
   // ===========================
   // Event Wiring
@@ -79,7 +73,8 @@
   // ===========================
   function handleCheckIn() {
     const nameOriginal = (nameInput?.value || "").trim();
-    const teamKey = (teamSelect?.value || "").trim();
+    const rawTeamValue = (teamSelect?.value || "").trim();
+    const teamKey = normalizeTeamKey(rawTeamValue);
 
     // Validation
     if (!nameOriginal) {
@@ -97,7 +92,7 @@
     if (state.checkins.length >= MAX_ATTENDEES) {
       showMessage(`🚫 Event is at capacity (${MAX_ATTENDEES}/${MAX_ATTENDEES}).`, false);
       lockIfFull();
-      maybeCelebrate(); // still ensure celebration state if already full
+      maybeCelebrate();
       return;
     }
 
@@ -141,6 +136,15 @@
     return (str || "").trim().replace(/\s+/g, " ").toLowerCase();
   }
 
+  function normalizeTeamKey(value) {
+    const v = (value || "").trim();
+    // if already a key
+    if (TEAM_MAP[v]) return v;
+    // if it's a label
+    if (LABEL_TO_KEY[v]) return LABEL_TO_KEY[v];
+    return v;
+  }
+
   // ===========================
   // Rendering
   // ===========================
@@ -180,10 +184,7 @@
   function renderAttendeeList() {
     if (!attendeeListEl) return;
 
-    // Clear list
     attendeeListEl.innerHTML = "";
-
-    // Show newest on top (nice UX)
     const items = [...state.checkins].reverse();
 
     if (items.length === 0) {
@@ -238,7 +239,6 @@
   // Celebration (Rubric LevelUp)
   // ===========================
   function maybeCelebrate() {
-    // Trigger only when goal reached and not already celebrated
     if (state.checkins.length !== MAX_ATTENDEES) return;
 
     if (!state.celebrated) {
@@ -246,17 +246,20 @@
       saveState(state);
     }
 
-    const winners = getWinningTeams(); // array of teamKeys (handle ties)
+    const winners = getWinningTeams(); // handle ties
     highlightWinners(winners);
 
     const winnerNames = winners.map((k) => TEAM_MAP[k]?.label || k).join(" & ");
-    showCelebrationBanner(`🎊 Goal reached! ${MAX_ATTENDEES}/${MAX_ATTENDEES} checked in. Winning team: ${winnerNames}!`);
+    showCelebrationBanner(
+      `🎊 Goal reached! ${MAX_ATTENDEES}/${MAX_ATTENDEES} checked in. Winning team: ${winnerNames}!`
+    );
   }
 
   function getTeamCounts() {
     const counts = { water: 0, zero: 0, power: 0 };
     for (const c of state.checkins) {
-      if (counts[c.teamKey] !== undefined) counts[c.teamKey] += 1;
+      const tk = normalizeTeamKey(c.teamKey);
+      if (counts[tk] !== undefined) counts[tk] += 1;
     }
     return counts;
   }
@@ -272,15 +275,12 @@
   }
 
   function highlightWinners(winnerKeys) {
-    // Clear old highlights
     clearAllTeamHighlights();
 
-    // Apply highlight to winner(s)
     for (const key of winnerKeys) {
       const card = TEAM_MAP[key]?.cardEl;
       if (!card) continue;
 
-      // Inline styling so we don't touch CSS
       card.style.outline = "3px solid #0071c5";
       card.style.boxShadow = "0 10px 30px rgba(0, 113, 197, 0.25)";
       card.style.transform = "translateY(-2px)";
@@ -298,14 +298,12 @@
   }
 
   function clearTeamHighlightsIfNotCelebrated() {
-    // If not celebrated yet, keep it clean (no highlights)
     if (!state.celebrated) clearAllTeamHighlights();
   }
 
   function ensureCelebrationBannerUI() {
     if (!container) return;
 
-    // Create banner above the check-in form (after greeting)
     celebrationBannerEl = document.createElement("div");
     celebrationBannerEl.id = "celebrationBanner";
     celebrationBannerEl.style.display = "none";
@@ -317,7 +315,6 @@
     celebrationBannerEl.style.fontWeight = "700";
     celebrationBannerEl.style.border = "1px solid rgba(0,0,0,0.06)";
 
-    // Insert right after greeting <p id="greeting">
     const greetingEl = document.getElementById("greeting");
     if (greetingEl && greetingEl.parentNode) {
       greetingEl.parentNode.insertBefore(celebrationBannerEl, greetingEl.nextSibling);
@@ -338,7 +335,6 @@
   function ensureAttendeeListUI() {
     if (!container) return;
 
-    // Create section container
     const section = document.createElement("div");
     section.id = "attendeeListSection";
     section.style.marginTop = "22px";
@@ -362,7 +358,6 @@
     section.appendChild(title);
     section.appendChild(list);
 
-    // Insert BEFORE team stats so it appears above “Team Attendance”
     if (teamStatsSection && teamStatsSection.parentNode) {
       teamStatsSection.parentNode.insertBefore(section, teamStatsSection);
     } else {
@@ -382,7 +377,6 @@
     greeting.style.display = "block";
     greeting.classList.toggle("success-message", !!success);
 
-    // Auto-hide normal greetings (keeps UI clean)
     window.clearTimeout(showMessage._t);
     showMessage._t = window.setTimeout(() => {
       greeting.style.display = "none";
@@ -406,19 +400,21 @@
 
       parsed.checkins = parsed.checkins
         .filter((c) => c && typeof c.nameOriginal === "string" && typeof c.teamKey === "string")
-        .map((c) => ({
-          nameOriginal: c.nameOriginal,
-          nameKey: typeof c.nameKey === "string" ? c.nameKey : normalizeName(c.nameOriginal),
-          teamKey: c.teamKey,
-          timeISO: typeof c.timeISO === "string" ? c.timeISO : new Date().toISOString()
-        }));
+        .map((c) => {
+          const teamKey = normalizeTeamKey(c.teamKey);
+          return {
+            nameOriginal: c.nameOriginal,
+            nameKey: typeof c.nameKey === "string" ? c.nameKey : normalizeName(c.nameOriginal),
+            teamKey,
+            timeISO: typeof c.timeISO === "string" ? c.timeISO : new Date().toISOString()
+          };
+        })
+        .filter((c) => TEAM_MAP[c.teamKey]); // keep only valid teams
 
-      // Cap at 50
       if (parsed.checkins.length > MAX_ATTENDEES) {
         parsed.checkins = parsed.checkins.slice(0, MAX_ATTENDEES);
       }
 
-      // If already full, celebration should be true (defensive)
       if (parsed.checkins.length === MAX_ATTENDEES) parsed.celebrated = true;
 
       return parsed;
@@ -434,10 +430,6 @@
   // ===========================
   // Optional Admin Helpers (Console)
   // ===========================
-  // DevTools console:
-  // IntelCheckIn.reset()
-  // IntelCheckIn.export()
-  // IntelCheckIn.removeLast()
   window.IntelCheckIn = {
     reset() {
       state = { checkins: [], celebrated: false };
@@ -454,7 +446,6 @@
       if (state.checkins.length === 0) return;
       const removed = state.checkins.pop();
 
-      // If we drop below goal, remove celebration state + UI
       if (state.checkins.length < MAX_ATTENDEES) {
         state.celebrated = false;
         if (celebrationBannerEl) celebrationBannerEl.style.display = "none";
@@ -469,5 +460,4 @@
       );
     }
   };
-
 })();
