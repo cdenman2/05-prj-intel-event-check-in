@@ -43,6 +43,8 @@
   };
 
   // --------- STATE ----------
+  // state.checkins: [{ id, nameOriginal, nameKey, teamKey, timeISO }]
+  // state.celebrated: boolean
   let state = loadState();
 
   // Injected UI elements
@@ -105,6 +107,7 @@
 
     // Add check-in
     state.checkins.push({
+      id: makeId(),
       nameOriginal,
       nameKey,
       teamKey,
@@ -113,19 +116,38 @@
 
     saveState(state);
 
-    // Personalized greeting (rubric: every check-in)
+    // Personalized greeting
     showMessage(`🎉 Welcome, ${nameOriginal} from ${TEAM_MAP[teamKey].label}!`, true);
 
     // UI updates
     renderAll();
     lockIfFull();
-
-    // Celebration at goal + highlight winning team(s)
     maybeCelebrate();
 
     // Reset name only (keep team selected)
     if (nameInput) nameInput.value = "";
     nameInput?.focus();
+  }
+
+  function deleteCheckInById(id) {
+    const idx = state.checkins.findIndex((c) => c.id === id);
+    if (idx === -1) return;
+
+    const removed = state.checkins.splice(idx, 1)[0];
+
+    // If we drop below goal, turn off celebration state + UI
+    if (state.checkins.length < MAX_ATTENDEES) {
+      state.celebrated = false;
+      if (celebrationBannerEl) celebrationBannerEl.style.display = "none";
+      clearAllTeamHighlights();
+    }
+
+    saveState(state);
+    renderAll();
+    lockIfFull();
+
+    const teamLabel = TEAM_MAP[removed.teamKey]?.label || removed.teamKey;
+    showMessage(`🗑️ Removed ${removed.nameOriginal} (${teamLabel}).`, true);
   }
 
   function isDuplicate(nameKey, teamKey) {
@@ -138,11 +160,14 @@
 
   function normalizeTeamKey(value) {
     const v = (value || "").trim();
-    // if already a key
     if (TEAM_MAP[v]) return v;
-    // if it's a label
     if (LABEL_TO_KEY[v]) return LABEL_TO_KEY[v];
     return v;
+  }
+
+  function makeId() {
+    // Good enough unique id for this app (time + random)
+    return `${Date.now()}_${Math.random().toString(16).slice(2)}`;
   }
 
   // ===========================
@@ -185,7 +210,7 @@
     if (!attendeeListEl) return;
 
     attendeeListEl.innerHTML = "";
-    const items = [...state.checkins].reverse();
+    const items = [...state.checkins].reverse(); // newest first
 
     if (items.length === 0) {
       const li = document.createElement("li");
@@ -202,6 +227,7 @@
       li.style.display = "flex";
       li.style.justifyContent = "space-between";
       li.style.alignItems = "center";
+      li.style.gap = "10px";
       li.style.padding = "10px 12px";
       li.style.border = "1px solid rgba(0,0,0,0.06)";
       li.style.borderRadius = "10px";
@@ -212,18 +238,66 @@
       left.textContent = c.nameOriginal;
       left.style.fontWeight = "600";
       left.style.color = "#2c3e50";
+      left.style.flex = "1";
+      left.style.minWidth = "0";
+      left.style.overflow = "hidden";
+      left.style.textOverflow = "ellipsis";
+      left.style.whiteSpace = "nowrap";
 
-      const right = document.createElement("span");
-      right.textContent = TEAM_MAP[c.teamKey]?.label || c.teamKey;
-      right.style.fontSize = "14px";
-      right.style.fontWeight = "600";
-      right.style.padding = "6px 10px";
-      right.style.borderRadius = "999px";
-      right.style.color = "#003c71";
-      right.style.background = "#e8f4fc";
+      const rightWrap = document.createElement("div");
+      rightWrap.style.display = "flex";
+      rightWrap.style.alignItems = "center";
+      rightWrap.style.gap = "8px";
+      rightWrap.style.flexShrink = "0";
+
+      const teamPill = document.createElement("span");
+      teamPill.textContent = TEAM_MAP[c.teamKey]?.label || c.teamKey;
+      teamPill.style.fontSize = "14px";
+      teamPill.style.fontWeight = "600";
+      teamPill.style.padding = "6px 10px";
+      teamPill.style.borderRadius = "999px";
+      teamPill.style.color = "#003c71";
+      teamPill.style.background = "#e8f4fc";
+
+      // DELETE (X) button
+      const delBtn = document.createElement("button");
+      delBtn.type = "button";
+      delBtn.textContent = "✕";
+      delBtn.setAttribute("aria-label", `Delete ${c.nameOriginal}`);
+      delBtn.title = "Delete attendee";
+      delBtn.style.width = "34px";
+      delBtn.style.height = "34px";
+      delBtn.style.minWidth = "34px";
+      delBtn.style.borderRadius = "10px";
+      delBtn.style.border = "1px solid rgba(0,0,0,0.10)";
+      delBtn.style.background = "#ffffff";
+      delBtn.style.color = "#1f2937";
+      delBtn.style.cursor = "pointer";
+      delBtn.style.fontWeight = "800";
+      delBtn.style.display = "flex";
+      delBtn.style.alignItems = "center";
+      delBtn.style.justifyContent = "center";
+      delBtn.style.boxShadow = "0 2px 8px rgba(0,0,0,0.04)";
+
+      delBtn.addEventListener("mouseenter", () => {
+        delBtn.style.background = "#f1f5f9";
+      });
+      delBtn.addEventListener("mouseleave", () => {
+        delBtn.style.background = "#ffffff";
+      });
+
+      // Confirm then delete
+      delBtn.addEventListener("click", () => {
+        const teamLabel = TEAM_MAP[c.teamKey]?.label || c.teamKey;
+        const ok = window.confirm(`Delete check-in for ${c.nameOriginal} (${teamLabel})?`);
+        if (ok) deleteCheckInById(c.id);
+      });
+
+      rightWrap.appendChild(teamPill);
+      rightWrap.appendChild(delBtn);
 
       li.appendChild(left);
-      li.appendChild(right);
+      li.appendChild(rightWrap);
       attendeeListEl.appendChild(li);
     }
   }
@@ -246,7 +320,7 @@
       saveState(state);
     }
 
-    const winners = getWinningTeams(); // handle ties
+    const winners = getWinningTeams();
     highlightWinners(winners);
 
     const winnerNames = winners.map((k) => TEAM_MAP[k]?.label || k).join(" & ");
@@ -358,6 +432,7 @@
     section.appendChild(title);
     section.appendChild(list);
 
+    // Insert BEFORE team stats so it appears above “Team Attendance”
     if (teamStatsSection && teamStatsSection.parentNode) {
       teamStatsSection.parentNode.insertBefore(section, teamStatsSection);
     } else {
@@ -403,6 +478,7 @@
         .map((c) => {
           const teamKey = normalizeTeamKey(c.teamKey);
           return {
+            id: typeof c.id === "string" ? c.id : makeId(),
             nameOriginal: c.nameOriginal,
             nameKey: typeof c.nameKey === "string" ? c.nameKey : normalizeName(c.nameOriginal),
             teamKey,
@@ -441,23 +517,6 @@
     },
     export() {
       return JSON.stringify(state, null, 2);
-    },
-    removeLast() {
-      if (state.checkins.length === 0) return;
-      const removed = state.checkins.pop();
-
-      if (state.checkins.length < MAX_ATTENDEES) {
-        state.celebrated = false;
-        if (celebrationBannerEl) celebrationBannerEl.style.display = "none";
-        clearAllTeamHighlights();
-      }
-
-      saveState(state);
-      renderAll();
-      showMessage(
-        `🗑️ Removed: ${removed.nameOriginal} (${TEAM_MAP[removed.teamKey]?.label || removed.teamKey})`,
-        true
-      );
     }
   };
 })();
