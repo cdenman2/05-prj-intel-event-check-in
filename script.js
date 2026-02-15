@@ -1,3 +1,9 @@
+/* =========================================================
+   Intel Sustainability Summit Check-In (script.js)
+   FULL RUBRIC + Delete (X) + Edit attendee (name/team) + Confetti at 50
+   - No HTML/CSS changes required
+   ========================================================= */
+
 (() => {
   "use strict";
 
@@ -42,12 +48,6 @@
     "Team Renewables": "power"
   };
 
-  const KEY_TO_LABEL = {
-    water: "Team Water Wise",
-    zero: "Team Net Zero",
-    power: "Team Renewables"
-  };
-
   // --------- STATE ----------
   // state.checkins: [{ id, nameOriginal, nameKey, teamKey, timeISO }]
   // state.celebrated: boolean
@@ -62,7 +62,7 @@
   ensureCelebrationBannerUI();
   renderAll();
   wireEvents();
-  maybeCelebrate(); // if already at goal from saved state, show celebration/highlight
+  maybeCelebrate(); // if already at goal from saved state, show celebration/highlight/confetti
 
   // ===========================
   // Event Wiring
@@ -128,6 +128,7 @@
     lockIfFull();
     maybeCelebrate();
 
+    // Reset name only (keep team selected)
     if (nameInput) nameInput.value = "";
     nameInput?.focus();
   }
@@ -143,6 +144,7 @@
       state.celebrated = false;
       if (celebrationBannerEl) celebrationBannerEl.style.display = "none";
       clearAllTeamHighlights();
+      resetConfettiFlagIfNeeded();
     }
 
     saveState(state);
@@ -161,9 +163,9 @@
     const currentName = current.nameOriginal;
     const currentTeamKey = normalizeTeamKey(current.teamKey);
 
-    // 1) Ask for new name (blank -> cancel)
+    // 1) Ask for new name
     const newNameRaw = window.prompt("Edit attendee name:", currentName);
-    if (newNameRaw === null) return; // user hit Cancel
+    if (newNameRaw === null) return; // Cancel
     const newName = newNameRaw.trim();
     if (!newName) {
       showMessage("⚠️ Edit cancelled: name cannot be blank.", false);
@@ -171,7 +173,6 @@
     }
 
     // 2) Ask for new team
-    // Use a simple numeric choice for clarity
     const teamMenu =
       "Edit team (type 1, 2, or 3):\n" +
       "1 = Team Water Wise\n" +
@@ -182,7 +183,7 @@
       currentTeamKey === "water" ? "1" : currentTeamKey === "zero" ? "2" : "3";
 
     const teamChoice = window.prompt(teamMenu, defaultChoice);
-    if (teamChoice === null) return; // cancel
+    if (teamChoice === null) return; // Cancel
 
     const choice = teamChoice.trim();
     let newTeamKey = "";
@@ -194,7 +195,7 @@
       return;
     }
 
-    // 3) Duplicate prevention (ignore the record being edited)
+    // 3) Duplicate prevention (ignore record being edited)
     const newNameKey = normalizeName(newName);
     const wouldDuplicate = state.checkins.some(
       (c) => c.id !== id && c.nameKey === newNameKey && normalizeTeamKey(c.teamKey) === newTeamKey
@@ -213,18 +214,20 @@
       teamKey: newTeamKey
     };
 
-    // If we were at goal and now still at goal, keep celebration.
-    // If we were below goal, keep it off.
+    saveState(state);
+    renderAll();
+    lockIfFull();
+
+    // Confetti rule: only fire at exactly 50; editing doesn't change count,
+    // but we keep celebration logic consistent
     if (state.checkins.length < MAX_ATTENDEES) {
       state.celebrated = false;
       if (celebrationBannerEl) celebrationBannerEl.style.display = "none";
       clearAllTeamHighlights();
+      resetConfettiFlagIfNeeded();
+    } else {
+      maybeCelebrate();
     }
-
-    saveState(state);
-    renderAll();
-    lockIfFull();
-    maybeCelebrate();
 
     showMessage(`✅ Updated: ${newName} is now in ${TEAM_MAP[newTeamKey].label}.`, true);
   }
@@ -430,6 +433,9 @@
     showCelebrationBanner(
       `🎊 Goal reached! ${MAX_ATTENDEES}/${MAX_ATTENDEES} checked in. Winning team: ${winnerNames}!`
     );
+
+    // CONFETTI!
+    fireConfetti();
   }
 
   function getTeamCounts() {
@@ -563,6 +569,107 @@
   }
 
   // ===========================
+  // Confetti (no libraries)
+  // ===========================
+  let confettiAlreadyFired = false;
+
+  function fireConfetti() {
+    if (confettiAlreadyFired) return;
+    confettiAlreadyFired = true;
+
+    const canvas = document.createElement("canvas");
+    canvas.id = "confettiCanvas";
+    canvas.style.position = "fixed";
+    canvas.style.left = "0";
+    canvas.style.top = "0";
+    canvas.style.width = "100%";
+    canvas.style.height = "100%";
+    canvas.style.pointerEvents = "none";
+    canvas.style.zIndex = "9999";
+    document.body.appendChild(canvas);
+
+    const ctx = canvas.getContext("2d");
+
+    const dpr = window.devicePixelRatio || 1;
+    function resize() {
+      canvas.width = Math.floor(window.innerWidth * dpr);
+      canvas.height = Math.floor(window.innerHeight * dpr);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+    resize();
+
+    const colors = ["#0071c5", "#00aeef", "#00c7fd", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6"];
+    const pieces = [];
+    const count = 180;
+
+    for (let i = 0; i < count; i++) {
+      pieces.push({
+        x: Math.random() * window.innerWidth,
+        y: -20 - Math.random() * window.innerHeight * 0.3,
+        w: 6 + Math.random() * 6,
+        h: 8 + Math.random() * 10,
+        color: colors[Math.floor(Math.random() * colors.length)],
+        speedY: 2 + Math.random() * 4.5,
+        speedX: -1.5 + Math.random() * 3,
+        rotation: Math.random() * Math.PI * 2,
+        rotationSpeed: -0.2 + Math.random() * 0.4,
+        sway: 0.8 + Math.random() * 1.6,
+        swayPhase: Math.random() * Math.PI * 2
+      });
+    }
+
+    let start = performance.now();
+    const durationMs = 4200;
+
+    function draw(now) {
+      const elapsed = now - start;
+      ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
+
+      for (const p of pieces) {
+        p.y += p.speedY;
+        p.x += p.speedX + Math.sin(p.swayPhase + p.y * 0.02) * p.sway;
+        p.rotation += p.rotationSpeed;
+
+        if (p.x < -30) p.x = window.innerWidth + 30;
+        if (p.x > window.innerWidth + 30) p.x = -30;
+
+        ctx.save();
+        ctx.translate(p.x, p.y);
+        ctx.rotate(p.rotation);
+        ctx.fillStyle = p.color;
+        ctx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h);
+        ctx.restore();
+      }
+
+      if (elapsed < durationMs) {
+        requestAnimationFrame(draw);
+      } else {
+        cleanup();
+      }
+    }
+
+    function cleanup() {
+      window.removeEventListener("resize", onResize);
+      canvas.remove();
+    }
+
+    function onResize() {
+      resize();
+    }
+
+    window.addEventListener("resize", onResize);
+    requestAnimationFrame(draw);
+  }
+
+  function resetConfettiFlagIfNeeded() {
+    if (state.checkins.length < MAX_ATTENDEES) {
+      confettiAlreadyFired = false;
+      const existing = document.getElementById("confettiCanvas");
+      if (existing) existing.remove();
+    }
+  }
+
+  // ===========================
   // Persistence
   // ===========================
   function loadState() {
@@ -614,6 +721,7 @@
       saveState(state);
       if (celebrationBannerEl) celebrationBannerEl.style.display = "none";
       clearAllTeamHighlights();
+      resetConfettiFlagIfNeeded();
       renderAll();
       showMessage("✅ Reset: all check-ins cleared.", true);
     },
