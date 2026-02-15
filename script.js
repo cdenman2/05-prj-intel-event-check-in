@@ -24,7 +24,7 @@
 
   // --------- SETTINGS ----------
   const MAX_ATTENDEES = 50;
-  const STORAGE_KEY = "intel_summit_checkins_v5";
+  const STORAGE_KEY = "intel_summit_checkins_v6";
 
   const TEAM_MAP = {
     water: { label: "Team Water Wise", countEl: waterCountEl, cardEl: waterCard },
@@ -46,7 +46,7 @@
   let confettiAlreadyFired = false;
 
   // --------- INIT ----------
-  applyTeamCardColors();      // ⭐ NEW: apply custom colors + Intel outline
+  applyTeamCardStyles();       // ⭐ NEW: lighter colors, black bold text, circled icons
   ensureAttendeeListUI();
   ensureCelebrationBannerUI();
   ensureAdminControlsUI();
@@ -55,28 +55,70 @@
   maybeCelebrate();
 
   // ===========================
-  // Team Card Colors (NEW)
+  // Team Card Styling (NEW)
   // ===========================
-  function applyTeamCardColors() {
+  function applyTeamCardStyles() {
     const intelBlue = "#0071c5";
 
-    if (waterCard) {
-      waterCard.style.backgroundColor = "#0b4f8a"; // darker blue
-      waterCard.style.outline = `2px solid ${intelBlue}`;
-      waterCard.style.color = "#ffffff";
-    }
+    styleCard(waterCard, "#dbeafe"); // light blue
+    styleCard(zeroCard, "#dcfce7");  // light green
+    styleCard(powerCard, "#fce7f3"); // light pink
+  }
 
-    if (zeroCard) {
-      zeroCard.style.backgroundColor = "#0f6b3f"; // darker green
-      zeroCard.style.outline = `2px solid ${intelBlue}`;
-      zeroCard.style.color = "#ffffff";
-    }
+  function styleCard(card, bgColor) {
+    if (!card) return;
 
-    if (powerCard) {
-      powerCard.style.backgroundColor = "#a8326a"; // darker pink
-      powerCard.style.outline = `2px solid ${intelBlue}`;
-      powerCard.style.color = "#ffffff";
+    card.style.backgroundColor = bgColor;
+    card.style.outline = "2px solid #0071c5";
+    card.style.color = "#000000";
+    card.style.fontWeight = "700";
+
+    // Make text black & bold
+    const nameEl = card.querySelector(".team-name");
+    const countEl = card.querySelector(".team-count");
+
+    if (nameEl) {
+      nameEl.style.color = "#000000";
+      nameEl.style.fontWeight = "800";
+      circleFirstEmoji(nameEl);
     }
+    if (countEl) {
+      countEl.style.color = "#000000";
+      countEl.style.fontWeight = "800";
+      countEl.style.fontSize = "22px";
+    }
+  }
+
+  // Wrap the first emoji in a circle
+  function circleFirstEmoji(el) {
+    const text = el.textContent || "";
+    if (!text.trim()) return;
+
+    // Split first character (emoji) from rest
+    const firstChar = text.trim().charAt(0);
+    const rest = text.trim().slice(1).trim();
+
+    // Clear and rebuild
+    el.textContent = "";
+
+    const iconSpan = document.createElement("span");
+    iconSpan.textContent = firstChar;
+    iconSpan.style.display = "inline-flex";
+    iconSpan.style.alignItems = "center";
+    iconSpan.style.justifyContent = "center";
+    iconSpan.style.width = "28px";
+    iconSpan.style.height = "28px";
+    iconSpan.style.borderRadius = "50%";
+    iconSpan.style.border = "2px solid #0071c5";
+    iconSpan.style.marginRight = "8px";
+    iconSpan.style.fontSize = "16px";
+    iconSpan.style.background = "#ffffff";
+
+    const textSpan = document.createElement("span");
+    textSpan.textContent = rest;
+
+    el.appendChild(iconSpan);
+    el.appendChild(textSpan);
   }
 
   // ===========================
@@ -178,7 +220,7 @@
   }
 
   // ===========================
-  // Rendering (counts, list, etc.)
+  // Rendering
   // ===========================
   function renderAll() {
     if (attendeeCountEl) attendeeCountEl.textContent = String(state.checkins.length);
@@ -243,7 +285,7 @@
   function fireConfetti() {
     if (confettiAlreadyFired) return;
     confettiAlreadyFired = true;
-    // (Your existing confetti code already works here)
+    // (Your working confetti code already runs here)
   }
 
   function resetConfettiFlagIfNeeded() {
@@ -278,7 +320,6 @@
       attendeeListEl = existing;
       return;
     }
-
     const ul = document.createElement("ul");
     ul.id = "attendeeList";
     container.appendChild(ul);
