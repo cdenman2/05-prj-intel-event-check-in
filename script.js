@@ -42,6 +42,12 @@
     "Team Renewables": "power"
   };
 
+  const KEY_TO_LABEL = {
+    water: "Team Water Wise",
+    zero: "Team Net Zero",
+    power: "Team Renewables"
+  };
+
   // --------- STATE ----------
   // state.checkins: [{ id, nameOriginal, nameKey, teamKey, timeISO }]
   // state.celebrated: boolean
@@ -116,15 +122,12 @@
 
     saveState(state);
 
-    // Personalized greeting
     showMessage(`🎉 Welcome, ${nameOriginal} from ${TEAM_MAP[teamKey].label}!`, true);
 
-    // UI updates
     renderAll();
     lockIfFull();
     maybeCelebrate();
 
-    // Reset name only (keep team selected)
     if (nameInput) nameInput.value = "";
     nameInput?.focus();
   }
@@ -150,8 +153,84 @@
     showMessage(`🗑️ Removed ${removed.nameOriginal} (${teamLabel}).`, true);
   }
 
+  function editCheckInById(id) {
+    const idx = state.checkins.findIndex((c) => c.id === id);
+    if (idx === -1) return;
+
+    const current = state.checkins[idx];
+    const currentName = current.nameOriginal;
+    const currentTeamKey = normalizeTeamKey(current.teamKey);
+
+    // 1) Ask for new name (blank -> cancel)
+    const newNameRaw = window.prompt("Edit attendee name:", currentName);
+    if (newNameRaw === null) return; // user hit Cancel
+    const newName = newNameRaw.trim();
+    if (!newName) {
+      showMessage("⚠️ Edit cancelled: name cannot be blank.", false);
+      return;
+    }
+
+    // 2) Ask for new team
+    // Use a simple numeric choice for clarity
+    const teamMenu =
+      "Edit team (type 1, 2, or 3):\n" +
+      "1 = Team Water Wise\n" +
+      "2 = Team Net Zero\n" +
+      "3 = Team Renewables";
+
+    const defaultChoice =
+      currentTeamKey === "water" ? "1" : currentTeamKey === "zero" ? "2" : "3";
+
+    const teamChoice = window.prompt(teamMenu, defaultChoice);
+    if (teamChoice === null) return; // cancel
+
+    const choice = teamChoice.trim();
+    let newTeamKey = "";
+    if (choice === "1") newTeamKey = "water";
+    else if (choice === "2") newTeamKey = "zero";
+    else if (choice === "3") newTeamKey = "power";
+    else {
+      showMessage("⚠️ Invalid team choice. Edit cancelled.", false);
+      return;
+    }
+
+    // 3) Duplicate prevention (ignore the record being edited)
+    const newNameKey = normalizeName(newName);
+    const wouldDuplicate = state.checkins.some(
+      (c) => c.id !== id && c.nameKey === newNameKey && normalizeTeamKey(c.teamKey) === newTeamKey
+    );
+
+    if (wouldDuplicate) {
+      showMessage(`⚠️ Cannot edit: "${newName}" is already checked in for ${TEAM_MAP[newTeamKey].label}.`, false);
+      return;
+    }
+
+    // 4) Apply edit
+    state.checkins[idx] = {
+      ...current,
+      nameOriginal: newName,
+      nameKey: newNameKey,
+      teamKey: newTeamKey
+    };
+
+    // If we were at goal and now still at goal, keep celebration.
+    // If we were below goal, keep it off.
+    if (state.checkins.length < MAX_ATTENDEES) {
+      state.celebrated = false;
+      if (celebrationBannerEl) celebrationBannerEl.style.display = "none";
+      clearAllTeamHighlights();
+    }
+
+    saveState(state);
+    renderAll();
+    lockIfFull();
+    maybeCelebrate();
+
+    showMessage(`✅ Updated: ${newName} is now in ${TEAM_MAP[newTeamKey].label}.`, true);
+  }
+
   function isDuplicate(nameKey, teamKey) {
-    return state.checkins.some((c) => c.nameKey === nameKey && c.teamKey === teamKey);
+    return state.checkins.some((c) => c.nameKey === nameKey && normalizeTeamKey(c.teamKey) === teamKey);
   }
 
   function normalizeName(str) {
@@ -166,7 +245,6 @@
   }
 
   function makeId() {
-    // Good enough unique id for this app (time + random)
     return `${Date.now()}_${Math.random().toString(16).slice(2)}`;
   }
 
@@ -194,13 +272,11 @@
   }
 
   function renderTeamCounts() {
-    // Reset visible counts
     Object.values(TEAM_MAP).forEach(({ countEl }) => {
       if (countEl) countEl.textContent = "0";
     });
 
     const counts = getTeamCounts();
-
     for (const [teamKey, teamData] of Object.entries(TEAM_MAP)) {
       if (teamData.countEl) teamData.countEl.textContent = String(counts[teamKey] || 0);
     }
@@ -251,13 +327,40 @@
       rightWrap.style.flexShrink = "0";
 
       const teamPill = document.createElement("span");
-      teamPill.textContent = TEAM_MAP[c.teamKey]?.label || c.teamKey;
+      teamPill.textContent = TEAM_MAP[normalizeTeamKey(c.teamKey)]?.label || c.teamKey;
       teamPill.style.fontSize = "14px";
       teamPill.style.fontWeight = "600";
       teamPill.style.padding = "6px 10px";
       teamPill.style.borderRadius = "999px";
       teamPill.style.color = "#003c71";
       teamPill.style.background = "#e8f4fc";
+
+      // EDIT button
+      const editBtn = document.createElement("button");
+      editBtn.type = "button";
+      editBtn.textContent = "Edit";
+      editBtn.title = "Edit name/team";
+      editBtn.style.height = "34px";
+      editBtn.style.padding = "0 12px";
+      editBtn.style.borderRadius = "10px";
+      editBtn.style.border = "1px solid rgba(0,0,0,0.10)";
+      editBtn.style.background = "#ffffff";
+      editBtn.style.color = "#1f2937";
+      editBtn.style.cursor = "pointer";
+      editBtn.style.fontWeight = "700";
+      editBtn.style.display = "flex";
+      editBtn.style.alignItems = "center";
+      editBtn.style.justifyContent = "center";
+      editBtn.style.boxShadow = "0 2px 8px rgba(0,0,0,0.04)";
+
+      editBtn.addEventListener("mouseenter", () => {
+        editBtn.style.background = "#f1f5f9";
+      });
+      editBtn.addEventListener("mouseleave", () => {
+        editBtn.style.background = "#ffffff";
+      });
+
+      editBtn.addEventListener("click", () => editCheckInById(c.id));
 
       // DELETE (X) button
       const delBtn = document.createElement("button");
@@ -286,14 +389,14 @@
         delBtn.style.background = "#ffffff";
       });
 
-      // Confirm then delete
       delBtn.addEventListener("click", () => {
-        const teamLabel = TEAM_MAP[c.teamKey]?.label || c.teamKey;
+        const teamLabel = TEAM_MAP[normalizeTeamKey(c.teamKey)]?.label || c.teamKey;
         const ok = window.confirm(`Delete check-in for ${c.nameOriginal} (${teamLabel})?`);
         if (ok) deleteCheckInById(c.id);
       });
 
       rightWrap.appendChild(teamPill);
+      rightWrap.appendChild(editBtn);
       rightWrap.appendChild(delBtn);
 
       li.appendChild(left);
@@ -432,7 +535,6 @@
     section.appendChild(title);
     section.appendChild(list);
 
-    // Insert BEFORE team stats so it appears above “Team Attendance”
     if (teamStatsSection && teamStatsSection.parentNode) {
       teamStatsSection.parentNode.insertBefore(section, teamStatsSection);
     } else {
@@ -485,7 +587,7 @@
             timeISO: typeof c.timeISO === "string" ? c.timeISO : new Date().toISOString()
           };
         })
-        .filter((c) => TEAM_MAP[c.teamKey]); // keep only valid teams
+        .filter((c) => TEAM_MAP[c.teamKey]);
 
       if (parsed.checkins.length > MAX_ATTENDEES) {
         parsed.checkins = parsed.checkins.slice(0, MAX_ATTENDEES);
